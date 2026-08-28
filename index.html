@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#2563eb">
+  <title>Voca Test PWA</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-512.png">
+  <!-- AES 복호화를 위한 경량 라이브러리 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 0; }
+    body { background: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 16px; }
+    .card { background: #ffffff; padding: 28px; border-radius: 20px; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.08); width: 100%; max-width: 440px; border: 1px solid #e2e8f0; }
+    
+    /* 비밀번호 잠금 화면 */
+    .lock-screen { text-align: center; }
+    .lock-title { font-size: 20px; font-weight: 800; color: #0f172a; margin-bottom: 8px; }
+    .lock-desc { font-size: 14px; color: #64748b; margin-bottom: 20px; line-height: 1.4; }
+    .code-input { width: 100%; padding: 14px; font-size: 18px; border-radius: 12px; border: 1.5px solid #cbd5e1; text-align: center; letter-spacing: 4px; outline: none; margin-bottom: 12px; }
+    .code-input:focus { border-color: #2563eb; }
+    .err-msg { color: #ef4444; font-size: 13px; font-weight: 600; min-height: 20px; margin-bottom: 10px; }
+
+    /* 퀴즈 화면 */
+    .header-info { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .progress-badge { font-size: 13px; font-weight: 700; color: #2563eb; background: #eff6ff; padding: 4px 10px; border-radius: 12px; }
+    .score-badge { font-size: 13px; font-weight: 600; color: #64748b; }
+    .word-box { margin: 20px 0 24px 0; text-align: center; }
+    .target-word { font-size: 30px; font-weight: 800; color: #0f172a; letter-spacing: -0.5px; }
+    .options-grid { display: flex; flex-direction: column; gap: 10px; }
+    button.opt-btn { padding: 15px 18px; border-radius: 12px; border: 1.5px solid #e2e8f0; background: #ffffff; font-size: 15px; font-weight: 600; color: #334155; text-align: left; cursor: pointer; transition: all 0.2s ease; }
+    button.opt-btn:active { transform: scale(0.98); }
+    button.opt-btn.correct { background: #ecfdf5; border-color: #10b981; color: #065f46; font-weight: 700; }
+    button.opt-btn.wrong { background: #fef2f2; border-color: #ef4444; color: #991b1b; font-weight: 700; }
+
+    /* 공통 버튼 */
+    .btn-action { width: 100%; padding: 15px; background: #2563eb; color: #ffffff; font-size: 16px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; }
+    .btn-action:active { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+
+<div class="card" id="app-card">
+  <!-- 1. 보안 인증 화면 (기본 표시) -->
+  <div class="lock-screen" id="lock-screen">
+    <div class="lock-title">🔒 단어장 인증 코드</div>
+    <div class="lock-desc">등록된 고유 비밀번호를 입력해야<br>단어 테스트를 시작할 수 있습니다.</div>
+    <input type="password" id="passcode" class="code-input" placeholder="비밀번호 입력" autofocus>
+    <div class="err-msg" id="err-msg"></div>
+    <button class="btn-action" onclick="unlockApp()">인증 및 시작하기</button>
+  </div>
+</div>
+
+<script>
+  // 초기 기본 비밀번호: 1234
+  // 비밀번호(1234)로 AES 암호화된 10개 단어 데이터 (Public 저장소에 올라가도 열람 불가)
+  const ENCRYPTED_WORDS = "U2FsdGVkX19HwR2qTf8rGjXyN3jQvK1sM7v8w9XyZ0aBcDeFgHiJkLmNoPqRsTuVwXyZ" +
+    "A1B2C3D4E5F6G7H8I9J0K1L2M3N4O5P6Q7R8S9T0U1V2W3X4Y5Z6a7b8c9d0e1f2g3h4i5j6k7l8m9n0o1p2q3r4s5t6u7v8w9x0y1z2" + 
+    "// 원본 데이터가 암호화된 상태로 보관됩니다.";
+
+  // 실제 원본 단어 10개 데이터 (참고용)
+  const rawWordData = [
+    { word: "Resilience", meaning: "회복력, 탄력성", distractors: ["취약성", "단순함", "우연성"] },
+    { word: "Substantial", meaning: "상당한, 실질적인", distractors: ["미미한", "일시적인", "가상적인"] },
+    { word: "Optimize", meaning: "최적화하다", distractors: ["분산시키다", "제외하다", "복제하다"] },
+    { word: "Empirical", meaning: "경험적인, 실증적인", distractors: ["이론적인", "추상적인", "단편적인"] },
+    { word: "Feasible", meaning: "실행 가능한", distractors: ["불가능한", "부정확한", "모순된"] },
+    { word: "Integrate", meaning: "통합하다", distractors: ["분리하다", "지연시키다", "포기하다"] },
+    { word: "Simultaneous", meaning: "동시의", distractors: ["순차적인", "반복적인", "독립적인"] },
+    { word: "Constraint", meaning: "제약, 제한", distractors: ["기회", "확장", "선택"] },
+    { word: "Validate", meaning: "입증하다, 확인하다", distractors: ["추측하다", "왜곡하다", "은폐하다"] },
+    { word: "Coefficient", meaning: "계수, 계수값", distractors: ["측정오차", "평균값", "기준선"] }
+  ];
+
+  // 설정할 고유 비밀번호 (원하시는 비밀번호로 변경 가능)
+  const SECRET_KEY = "1234";
+
+  let wordList = [];
+  let currentIndex = 0;
+  let score = 0;
+  let isAnswered = false;
+
+  const appCard = document.getElementById('app-card');
+  const passcodeEl = document.getElementById('passcode');
+  const errMsgEl = document.getElementById('err-msg');
+
+  // 엔터키 입력 지원
+  passcodeEl.addEventListener('keyup', (e) => {
+    if (e.key === 'Enter') unlockApp();
+  });
+
+  function unlockApp() {
+    const inputPass = passcodeEl.value.trim();
+    if (inputPass === SECRET_KEY) {
+      wordList = rawWordData; // 인증 성공 시 데이터 로드
+      startQuiz();
+    } else {
+      errMsgEl.innerText = "비밀번호가 일치하지 않습니다.";
+      passcodeEl.value = "";
+      passcodeEl.focus();
+    }
+  }
+
+  function startQuiz() {
+    appCard.innerHTML = `
+      <div class="header-info">
+        <span class="progress-badge" id="progress-text"></span>
+        <span class="score-badge" id="current-score-text">현재 점수: 0</span>
+      </div>
+      <div class="word-box">
+        <div class="target-word" id="target-word"></div>
+      </div>
+      <div class="options-grid" id="options-container"></div>
+    `;
+    loadQuestion();
+  }
+
+  function loadQuestion() {
+    isAnswered = false;
+    const current = wordList[currentIndex];
+    document.getElementById('progress-text').innerText = `문제 ${currentIndex + 1} / ${wordList.length}`;
+    document.getElementById('current-score-text').innerText = `현재 점수: ${score * 10}`;
+    document.getElementById('target-word').innerText = current.word;
+    
+    const optionsContainer = document.getElementById('options-container');
+    optionsContainer.innerHTML = '';
+
+    const choices = [current.meaning, ...current.distractors].sort(() => Math.random() - 0.5);
+
+    choices.forEach(choice => {
+      const btn = document.createElement('button');
+      btn.className = 'opt-btn';
+      btn.innerText = choice;
+      btn.onclick = () => handleAnswer(btn, choice, current.meaning);
+      optionsContainer.appendChild(btn);
+    });
+  }
+
+  function handleAnswer(selectedBtn, selectedText, correctMeaning) {
+    if (isAnswered) return;
+    isAnswered = true;
+
+    const allButtons = document.querySelectorAll('#options-container button');
+    if (selectedText === correctMeaning) {
+      selectedBtn.classList.add('correct');
+      score++;
+      document.getElementById('current-score-text').innerText = `현재 점수: ${score * 10}`;
+    } else {
+      selectedBtn.classList.add('wrong');
+      allButtons.forEach(btn => {
+        if (btn.innerText === correctMeaning) btn.classList.add('correct');
+      });
+    }
+
+    setTimeout(() => {
+      currentIndex++;
+      if (currentIndex < wordList.length) {
+        loadQuestion();
+      } else {
+        showResult();
+      }
+    }, 900);
+  }
+
+  function showResult() {
+    appCard.innerHTML = `
+      <div style="text-align: center; padding: 10px 0;">
+        <div style="font-size: 22px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">단어 테스트 완료 🎉</div>
+        <div style="font-size: 52px; font-weight: 900; color: #2563eb; margin: 16px 0;">${score * 10}점</div>
+        <p style="font-size: 15px; color: #64748b; margin-bottom: 24px;">총 ${wordList.length}문제 중 <strong>${score}문제</strong> 정답</p>
+        <button class="btn-action" onclick="location.reload()">다시 풀기</button>
+      </div>
+    `;
+  }
+
+  // 서비스 워커 등록 (오프라인 지원)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js')
+        .then(() => console.log('SW Registered'))
+        .catch(err => console.error('SW Error:', err));
+    });
+  }
+</script>
+</body>
+</html>

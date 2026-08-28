@@ -1,0 +1,18 @@
+{
+  "name": "Vocabulary Quiz PWA",
+  "short_name": "VocaQuiz",
+  "description": "반응형 오프라인 지원 단어 퀴즈 앱",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
